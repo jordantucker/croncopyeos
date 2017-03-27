@@ -1,0 +1,236 @@
+#!/usr/bin/env python
+
+import os, sys, shutil, glob, subprocess, re, logging
+from datetime import datetime
+from glob import glob
+
+user = os.environ['USER']
+home = os.path.expanduser('~')
+
+source_user = 'tucker'
+source_mail = 'jordantucker@gmail.com'
+source_list_dir = '/uscms/home/%s/public/croncopyeos/%s' % (source_user, user)
+source_dir_base = '/store/user/%s/' % source_user
+
+dest_dir_base = '/store/user/%s/croncopyeos/' % user
+
+eos_url = 'root://cmseos.fnal.gov/'
+
+my_dir = os.path.join(home, '.croncopyeos')
+script_path = os.path.join(my_dir, 'croncopyeos')
+
+log_dir = os.path.join(my_dir, 'logs')
+log_level_fn = os.path.join(source_list_dir, '.loglevel')
+log_level = logging.INFO if not os.path.exists(log_level_fn) else int(open(log_level_fn).read())
+logs_to_keep = 72
+
+lock_fn = os.path.join(my_dir, 'lock')
+max_lock_count = 5
+
+run_every = 30 # minutes
+
+####
+
+def popen(cmd, shell=False):
+    if type(cmd) == str:
+        cmd = cmd.split()
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=shell)
+
+def system(cmd):
+    if type(cmd) == str:
+        cmd = cmd.split()
+    return subprocess.call(cmd, stdout=open(os.devnull, 'w'), stderr=subprocess.STDOUT) == 0
+    
+def send_mail(body):
+    subject = 'croncopyeos %s -> %s' % (source_user, user)
+    subprocess.Popen(['mail', '-s', subject, source_mail], stdin=subprocess.PIPE).communicate(body)
+
+def eos_exists(fn):
+    return system('eos %s ls %s' % (eos_url, fn))
+
+def eos_mkdir(fn):
+    dn = os.path.dirname(fn)
+    if eos_exists(dn):
+        return True
+    return system('eos %s mkdir -p %s' % (eos_url, dn))
+
+def eos_cp(src, dst):
+    return system('xrdcp -s %s%s %s%s' % (eos_url, src, eos_url, dst))
+
+def eos_rm(fn):
+    return system('eos %s rm %s' % (eos_url, fn))
+
+def eos_md5sum(fn):
+    cmd = 'xrdcp -s %s%s -' % (eos_url, fn)
+    cmd2 = ('md5sum',)
+    p  = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    p2 = subprocess.Popen(('md5sum',), stdin=p.stdout, stdout=subprocess.PIPE)
+    p.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
+    return p2.communicate()[0].split()[0]
+
+####
+
+def setup_dirs():
+    for d in my_dir, log_dir:
+        if not os.path.isdir(d):
+            os.mkdir(d)
+            os.chmod(d, 0755)
+
+def take_lock():
+    last_count = 0
+    if os.path.isfile(lock_fn):
+        last_count = int(open(lock_fn, 'r').read())
+    open(lock_fn, 'wt').write(str(last_count + 1))
+
+def release_lock():
+    os.remove(lock_fn)
+
+def lock_count():
+    if not os.path.isfile(lock_fn):
+        return 0
+    else:
+        int(open(lock_fn).read())
+
+def check_lock():
+    # if we are still running or crashed last time without cleaning up
+    # the lock, die immediately. If this is the max_lock_count-th time
+    # in a row, send an email.
+    c = lock_count()
+    take_lock()
+    if c:
+        if c >= max_lock_count:
+            msg = 'lock is broken: count = %i' % c
+            print msg
+            send_mail(msg)
+        return False
+    return True
+
+def setup_log():
+    # rotate logs
+    fn_fmt = os.path.join(log_dir, 'log.%i')
+    for i in xrange(logs_to_keep-1, -1, -1):
+        if os.path.isfile(fn_fmt % i):
+            shutil.move(fn_fmt % i, fn_fmt % (i+1))
+
+    logging.basicConfig(filename=fn_fmt % 0,
+                        format='%(levelname)s %(asctime)s %(message)s',
+                        level=log_level)
+
+def install_script():
+    if sys.argv[0] != script_path:
+        shutil.copy2(sys.argv[0], script_path)
+        os.chmod(script_path, 0755)
+        logging.debug('script installed at %s' % script_path)
+    else:
+        logging.debug('script already installed at %s' % script_path)
+
+def setup_crontab():
+    crontab = ''
+    p = popen('crontab -l')
+    r = p.communicate()
+    if p.returncode == 0:
+        crontab += r[0]
+    if script_path in crontab:
+        logging.debug('crontab already installed')
+        return
+
+    crontab = crontab.strip()
+    if crontab:
+        crontab = '\n'.join(x.strip() for x in crontab.split('\n') if x.strip()) + '\n'
+    crontab += '*/%i * * * * %s\n'  % (run_every, script_path)
+
+    p = popen('crontab -')
+    p.stdin.write(crontab)
+    p.communicate()
+    if p.returncode != 0:
+        logging.error('could not install crontab')
+
+def setup():
+    setup_dirs()
+    if not check_lock():
+        return False
+    setup_log()
+    install_script()
+    setup_crontab()
+    return True
+
+def finish():
+    release_lock()
+
+####
+
+def main():
+    if not setup():
+        return
+
+    # look for steering files in source_list_dir.
+    steering_fns = glob(os.path.join(source_list_dir, '*'))
+    if not steering_fns:
+        logging.info('no steering fns in %s', source_list_dir)
+
+    for steering_fn in steering_fns:
+        logging.info('steering fn %s', steering_fn)
+        steering_lines = [l.strip() for l in open(steering_fn).readlines() if l.strip()]
+        if not steering_lines:
+            logging.info('empty file?')
+            continue
+
+        first_line = steering_lines.pop(0)
+
+        logging.debug('first line: %r with %i following lines', first_line, len(steering_lines))
+
+        # if the first line starts with "merge", then run a CMSSW
+        # merge job with the supplied parameters.
+        if first_line.startswith('merge'):
+            logging.info('is a merge job: %s', first_line)
+
+        # else, the file must start with "copy" and consist of lines
+        # in md5sum format: copy the files to our dest and read them
+        # back and check the md5sum.
+        elif first_line.startswith('copy'):
+            logging.info('is a copy job')
+            copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
+
+            for line in steering_lines:
+                mo = copy_line_re.search(line)
+                if not mo:
+                    logging.warning('bad line: %r', line)
+                    continue
+
+                md5sum, source_fn = mo.groups()
+                source_fn = source_fn.strip().replace('/eos/uscms', '')
+                logging.debug('md5sum %s fn %s' % (md5sum, source_fn))
+
+                if not source_fn.startswith(source_dir_base):
+                    logging.warning('dunno how to handle it, does not start with %s', source_dir_base)
+                    continue
+
+                dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
+                logging.info('%s -> %s', source_fn, dest_fn)
+
+                if eos_exists(dest_fn):
+                    logging.info('%s already exists, skipping', dest_fn)
+                    continue
+
+                if not eos_mkdir(dest_fn):
+                    logging.error('problem with mkdir %s', dest_fn)
+                    continue
+
+                if not eos_cp(source_fn, dest_fn):
+                    logging.error('problem with copy')
+
+                new_md5sum = eos_md5sum(dest_fn)
+                if new_md5sum != md5sum:
+                    logging.error('bad md5sum: old = %s new = %s', md5sum, new_md5sum)
+                    if not eos_rm(dest_fn):
+                        logging.error('and could not remove fn %s', dest_fn)
+                else:
+                    logging.info('success!')
+
+        else:
+            logging.error('dunno how to handle this steering file with first line %s', first_line)
+
+    finish()
+
+if __name__ == '__main__':
+    main()

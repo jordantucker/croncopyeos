@@ -258,7 +258,8 @@ process.out.dropMetaData = cms.untracked.string('ALL')
                 logging.error('problem running merge job:\n' + result[0])
                 return
 
-            evsz = popen('edmEventSize -v temp.root').communicate()[0].split('\n')
+            cmd = ['bash', '-c', 'source /cvmfs/cms.cern.ch/cmsset_default.sh && eval `scramv1 runtime -sh` && edmEventSize -v temp.root']
+            evsz = popen(cmd).communicate()[0].split('\n')
             events_line = [l for l in evsz if 'Events' in l]
             events_line = 'problem?' if not events_line else events_line[0]
             logging.debug('edmEventSize info:\n' + '\n'.join(evsz[:10]))

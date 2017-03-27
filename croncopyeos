@@ -53,6 +53,15 @@ def send_mail(body):
     subject = 'croncopyeos %s -> %s' % (source_user, user)
     subprocess.Popen(['mail', '-s', subject, source_mail], stdin=subprocess.PIPE).communicate(body)
 
+def hostname():
+    return popen('hostname').communicate()[0].strip()
+
+def eos_quota():
+    x = popen('eos root://cmseos.fnal.gov quota').communicate()[0].split('\n')
+    for i, line in enumerate(x):
+        if user in line:
+            return x[i-1] + '\n' + line
+
 def eos_exists(fn):
     return system('eos %s ls %s' % (eos_url, fn))
 
@@ -152,13 +161,14 @@ def install_script():
         logging.debug('script already installed at %s' % script_path)
 
 def setup_crontab():
+    hn = hostname()
     crontab = ''
     p = popen('crontab -l')
     r = p.communicate()
     if p.returncode == 0:
         crontab += r[0]
     if script_path in crontab:
-        logging.debug('crontab already installed')
+        logging.debug('crontab already installed on %s' % hn)
         return
 
     crontab = crontab.strip()
@@ -170,7 +180,7 @@ def setup_crontab():
     p.stdin.write(crontab)
     p.communicate()
     if p.returncode != 0:
-        logging.error('could not install crontab')
+        logging.error('could not install crontab on %s' % hn)
 
 def setup():
     setup_dirs()
@@ -179,6 +189,8 @@ def setup():
     setup_log()
     install_script()
     setup_crontab()
+    logging.info('hostname: ' + hostname())
+    logging.info('eos quota:\n' + eos_quota())
     return True
 
 def finish():

@@ -7,6 +7,8 @@ from glob import glob
 user = os.environ['USER']
 home = os.path.expanduser('~')
 
+scratch_dir = '/uscmst1b_scratch/lpc1/3DayLifetime/%s' % user
+
 source_user = 'tucker'
 source_mail = 'jordantucker@gmail.com'
 source_list_dir = '/uscms/home/%s/public/croncopyeos/%s' % (source_user, user)
@@ -74,6 +76,22 @@ def eos_md5sum(fn):
     p.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
     return p2.communicate()[0].split()[0]
 
+class cwd_sentry(object):
+    def __enter__(self):
+        self.cwd = os.getcwd()
+        return self.cwd
+    def __exit__(self, the_type, value, traceback):
+        os.chdir(self.cwd)
+
+class callcounted(object):
+    # http://stackoverflow.com/questions/812477/how-many-times-was-logging-error-called
+    def __init__(self, method):
+        self.method = method
+        self.counter = 0
+    def __call__(self, *args, **kwargs):
+        self.counter += 1
+        return self.method(*args, **kwargs)
+
 ####
 
 def setup_dirs():
@@ -110,15 +128,6 @@ def check_lock():
             send_mail(msg)
         return False
     return True
-
-class callcounted(object):
-    # http://stackoverflow.com/questions/812477/how-many-times-was-logging-error-called
-    def __init__(self, method):
-        self.method = method
-        self.counter = 0
-    def __call__(self, *args, **kwargs):
-        self.counter += 1
-        return self.method(*args, **kwargs)
 
 def setup_log():
     # rotate logs
@@ -177,6 +186,125 @@ def finish():
 
 ####
 
+def do_merge(first_line, steering_lines):
+    for_mail = []
+
+    first_line = first_line.split()
+    if len(first_line) != 3 or not first_line[1].startswith('CMSSW') or not first_line[2].endswith('.root'):
+        logging.warning('bad merge steering')
+    else:
+        cmssw_version, relative_dest_fn = first_line[1:]
+        dest_fn = os.path.join(dest_dir_base, relative_dest_fn)
+        input_fns = []
+        for line in steering_lines:
+            if not line.startswith(source_dir_base) or not line.endswith('.root'):
+                logging.warning('bad line: %r', line)
+                continue
+            input_fns.append(line)
+        if not input_fns:
+            logging.error('no input fns?')
+            return
+
+        if eos_exists(dest_fn):
+            logging.info('%s already exists, skipping', dest_fn)
+            return
+
+        if not eos_mkdir(dest_fn):
+            logging.error('problem with mkdir %s', dest_fn)
+            return
+
+        with cwd_sentry() as old_cwd:
+            os.chdir(scratch_dir)
+            cmssw_dir = 'croncopyeos_%s_%s' % (cmssw_version, time.strftime('%Y%m%d%H%M'))
+            if os.path.isdir(cmssw_dir):
+                logging.error('cmssw dir %s already exists?' % cmssw_dir)
+
+            cmd = ['bash', '-c', 'source /cvmfs/cms.cern.ch/cmsset_default.sh && scram project -n %(cmssw_dir)s CMSSW %(cmssw_version)s' % locals()]
+            if not system(cmd):
+                logging.error('problem setting up CMSSW %s' % cmssw_version)
+                return
+
+            os.chdir(os.path.join(scratch_dir, cmssw_dir, 'src'))
+            open('temp.py', 'wt').write('''
+import FWCore.ParameterSet.Config as cms
+process = cms.Process('Merge')
+process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(-1))
+process.source = cms.Source('PoolSource', fileNames = cms.untracked.vstring(*%(input_fns)r))
+process.load('FWCore.MessageLogger.MessageLogger_cfi')
+process.MessageLogger.cerr.FwkReport.reportEvery = 1000000
+process.out = cms.OutputModule('PoolOutputModule', fileName = cms.untracked.string('temp.root'))
+process.outp = cms.EndPath(process.out)
+process.source.inputCommands = cms.untracked.vstring('keep *', 'drop *_MEtoEDMConverter_*_*')
+process.out.outputCommands = cms.untracked.vstring('keep *', 'drop LumiDetails_lumiProducer_*_*', 'drop LumiSummary_lumiProducer_*_*', 'drop RunSummary_lumiProducer_*_*')
+process.out.dropMetaData = cms.untracked.string('ALL')
+''' % locals())
+            cmd = ['bash', '-c', 'source /cvmfs/cms.cern.ch/cmsset_default.sh && eval `scramv1 runtime -sh` && cmsRun temp.py']
+            p = popen(cmd)
+            result = p.communicate()
+
+            if p.returncode != 0 or not os.path.isfile('temp.root'):
+                logging.error('problem running merge job:\n' + result[0])
+                return
+
+            evsz = popen('edmEventSize -v temp.root').communicate()[0].split('\n')
+            events_line = [l for l in evsz if 'Events' in l]
+            events_line = 'problem?' if not events_line else events_line[0]
+            logging.debug('edmEventSize info:\n' + '\n'.join(evsz[:10]))
+
+            if not system('xrdcp -s temp.root %s%s' % (eos_url, dest_fn)):
+                logging.error('problem with xrdcp')
+            else:
+                for_mail.append(('merge', dest_fn, events_line))
+                logging.info('success!')
+
+            os.chdir(scratch_dir)
+            shutil.rmtree(cmssw_dir)
+
+    return for_mail
+
+def do_copy(first_line, steering_lines):
+    for_mail = []
+    copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
+
+    for line in steering_lines:
+        mo = copy_line_re.search(line)
+        if not mo:
+            logging.warning('bad line: %r', line)
+            continue
+
+        md5sum, source_fn = mo.groups()
+        source_fn = source_fn.strip().replace('/eos/uscms', '')
+        logging.debug('md5sum %s fn %s' % (md5sum, source_fn))
+
+        if not source_fn.startswith(source_dir_base):
+            logging.warning('dunno how to handle it, does not start with %s', source_dir_base)
+            continue
+
+        dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
+        logging.info('%s -> %s', source_fn, dest_fn)
+
+        if eos_exists(dest_fn):
+            logging.info('%s already exists, skipping', dest_fn)
+            continue
+
+        if not eos_mkdir(dest_fn):
+            logging.error('problem with mkdir %s', dest_fn)
+            continue
+
+        if not eos_cp(source_fn, dest_fn):
+            logging.error('problem with copy')
+
+        new_md5sum = eos_md5sum(dest_fn)
+        if new_md5sum != md5sum:
+            logging.error('bad md5sum: old = %s new = %s', md5sum, new_md5sum)
+            if not eos_rm(dest_fn):
+                logging.error('and could not remove fn %s', dest_fn)
+        else:
+            for_mail.append(('copy', dest_fn))
+            logging.info('success!')
+
+    return for_mail
+
 def main():
     if not setup():
         return
@@ -196,57 +324,24 @@ def main():
             continue
 
         first_line = steering_lines.pop(0)
-
         logging.debug('first line: %r with %i following lines', first_line, len(steering_lines))
 
         # if the first line starts with "merge", then run a CMSSW
         # merge job with the supplied parameters.
         if first_line.startswith('merge'):
             logging.info('is a merge job: %s', first_line)
-
+            ret = do_merge(first_line, steering_lines)
+            if ret:
+                for_mail.extend(ret)
+            
         # else, the file must start with "copy" and consist of lines
         # in md5sum format: copy the files to our dest and read them
         # back and check the md5sum.
         elif first_line.startswith('copy'):
             logging.info('is a copy job')
-            copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
-
-            for line in steering_lines:
-                mo = copy_line_re.search(line)
-                if not mo:
-                    logging.warning('bad line: %r', line)
-                    continue
-
-                md5sum, source_fn = mo.groups()
-                source_fn = source_fn.strip().replace('/eos/uscms', '')
-                logging.debug('md5sum %s fn %s' % (md5sum, source_fn))
-
-                if not source_fn.startswith(source_dir_base):
-                    logging.warning('dunno how to handle it, does not start with %s', source_dir_base)
-                    continue
-
-                dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
-                logging.info('%s -> %s', source_fn, dest_fn)
-
-                if eos_exists(dest_fn):
-                    logging.info('%s already exists, skipping', dest_fn)
-                    continue
-
-                if not eos_mkdir(dest_fn):
-                    logging.error('problem with mkdir %s', dest_fn)
-                    continue
-
-                if not eos_cp(source_fn, dest_fn):
-                    logging.error('problem with copy')
-
-                new_md5sum = eos_md5sum(dest_fn)
-                if new_md5sum != md5sum:
-                    logging.error('bad md5sum: old = %s new = %s', md5sum, new_md5sum)
-                    if not eos_rm(dest_fn):
-                        logging.error('and could not remove fn %s', dest_fn)
-                else:
-                    for_mail.append(('copy', dest_fn))
-                    logging.info('success!')
+            ret = do_copy(first_line, steering_lines)
+            if ret:
+                for_mail.extend(ret)
 
         else:
             logging.error('dunno how to handle this steering file with first line %s', first_line)

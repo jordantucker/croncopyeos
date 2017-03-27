@@ -313,7 +313,7 @@ def do_copy(first_line, steering_lines):
             if not eos_rm(dest_fn):
                 logging.error('and could not remove fn %s', dest_fn)
         else:
-            for_mail.append(('copy', dest_fn))
+            for_mail.append(('copy', source_fn))
             logging.info('success!')
 
     return for_mail

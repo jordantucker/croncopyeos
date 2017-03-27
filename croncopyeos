@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import os, sys, shutil, glob, subprocess, re, logging
+import os, sys, shutil, glob, subprocess, re, logging, time
 from datetime import datetime
 from glob import glob
 
@@ -19,13 +19,17 @@ eos_url = 'root://cmseos.fnal.gov/'
 my_dir = os.path.join(home, '.croncopyeos')
 script_path = os.path.join(my_dir, 'croncopyeos')
 
+lock_fn = os.path.join(my_dir, 'lock')
+max_lock_count = 5
+
 log_dir = os.path.join(my_dir, 'logs')
 log_level_fn = os.path.join(source_list_dir, '.loglevel')
 log_level = logging.INFO if not os.path.exists(log_level_fn) else int(open(log_level_fn).read())
-logs_to_keep = 72
+log_tag = time.asctime()
+logs_to_keep = 100
 
-lock_fn = os.path.join(my_dir, 'lock')
-max_lock_count = 5
+want_mail_fn = os.path.join(source_list_dir, '.wantmail')
+want_mail = not os.path.exists(want_mail_fn) or not open(want_mail_fn).read().lower().startswith('n')
 
 run_every = 30 # minutes
 
@@ -42,6 +46,8 @@ def system(cmd):
     return subprocess.call(cmd, stdout=open(os.devnull, 'w'), stderr=subprocess.STDOUT) == 0
     
 def send_mail(body):
+    if not want_mail:
+        return
     subject = 'croncopyeos %s -> %s' % (source_user, user)
     subprocess.Popen(['mail', '-s', subject, source_mail], stdin=subprocess.PIPE).communicate(body)
 
@@ -105,6 +111,15 @@ def check_lock():
         return False
     return True
 
+class callcounted(object):
+    # http://stackoverflow.com/questions/812477/how-many-times-was-logging-error-called
+    def __init__(self, method):
+        self.method = method
+        self.counter = 0
+    def __call__(self, *args, **kwargs):
+        self.counter += 1
+        return self.method(*args, **kwargs)
+
 def setup_log():
     # rotate logs
     fn_fmt = os.path.join(log_dir, 'log.%i')
@@ -115,6 +130,9 @@ def setup_log():
     logging.basicConfig(filename=fn_fmt % 0,
                         format='%(levelname)s %(asctime)s %(message)s',
                         level=log_level)
+    logging.warning = callcounted(logging.warning)
+    logging.error   = callcounted(logging.error)
+    logging.info('Log tag: %s' % log_tag)
 
 def install_script():
     if sys.argv[0] != script_path:
@@ -167,6 +185,8 @@ def main():
     steering_fns = glob(os.path.join(source_list_dir, '*'))
     if not steering_fns:
         logging.info('no steering fns in %s', source_list_dir)
+
+    for_mail = []
 
     for steering_fn in steering_fns:
         logging.info('steering fn %s', steering_fn)
@@ -225,11 +245,19 @@ def main():
                     if not eos_rm(dest_fn):
                         logging.error('and could not remove fn %s', dest_fn)
                 else:
+                    for_mail.append(('copy', dest_fn))
                     logging.info('success!')
 
         else:
             logging.error('dunno how to handle this steering file with first line %s', first_line)
 
+    if for_mail or logging.warning.counter or logging.error.counter:
+        mail  = 'Log tag: ' + log_tag + '\n'
+        mail += 'There were %i warnings and %i errors.\n' % (logging.warning.counter, logging.error.counter)
+        mail += 'Successful operations (# = %i):\n' % len(for_mail)
+        mail += '\n'.join([' '.join(x) for x in for_mail])
+        send_mail(mail)
+        
     finish()
 
 if __name__ == '__main__':

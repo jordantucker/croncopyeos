@@ -61,6 +61,7 @@ def eos_quota():
     for i, line in enumerate(x):
         if user in line:
             return x[i-1] + '\n' + line
+    return "eos quota command didn't work or didn't find user %s" % user
 
 def eos_exists(fn):
     return system('eos %s ls %s' % (eos_url, fn))

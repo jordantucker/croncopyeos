@@ -320,7 +320,7 @@ def main():
         return
 
     # look for steering files in source_list_dir.
-    steering_fns = glob(os.path.join(source_list_dir, '*'))
+    steering_fns = [x for x in glob(os.path.join(source_list_dir, '*')) if os.path.isfile(x)]
     if not steering_fns:
         logging.info('no steering fns in %s', source_list_dir)
 

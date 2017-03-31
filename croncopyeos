@@ -272,18 +272,29 @@ process.out.dropMetaData = cms.untracked.string('ALL')
 
     return for_mail
 
+def parse_copy(steering_lines):
+    copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
+    ret = []
+    for line in steering_lines:
+        mo = copy_line_re.search(line)
+        if not mo:
+            ret.append((line, None))
+        else:
+            md5sum, source_fn = mo.groups()
+            source_fn = source_fn.strip().replace('/eos/uscms', '')
+            ret.append((line, (md5sum, source_fn)))
+    return ret
+
 def do_copy(first_line, steering_lines):
     for_mail = []
     copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
 
-    for line in steering_lines:
-        mo = copy_line_re.search(line)
-        if not mo:
+    for line, mo in parse_copy(steering_lines):
+        if mo is None:
             logging.warning('bad line: %r', line)
             continue
 
-        md5sum, source_fn = mo.groups()
-        source_fn = source_fn.strip().replace('/eos/uscms', '')
+        md5sum, source_fn = mo
         logging.debug('md5sum %s fn %s' % (md5sum, source_fn))
 
         if not source_fn.startswith(source_dir_base):

@@ -282,12 +282,15 @@ def do_delete(first_line, steering_lines):
         line = line.replace('/eos/uscms', '')
         if not line.startswith(dest_dir_base) or not line.endswith('.root'):
             logging.warning('bad line: %r', line)
+            continue
 
         if not eos_exists(dest_fn):
             logging.warning("doesn't exist: %s", dest_fn)
+            continue
 
         if not eos_rm(dest_fn):
             logging.error('rm failed: %s', dest_fn)
+            continue
 
         for_mail.append(('delete', dest_fn))
 

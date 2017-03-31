@@ -122,7 +122,10 @@ def take_lock():
     return count
 
 def release_lock():
-    os.remove(lock_fn)
+    try:
+        os.remove(lock_fn)
+    except OSError:
+        pass
 
 def check_lock():
     # if we are still running or crashed last time without cleaning up
@@ -403,4 +406,15 @@ def main():
     finish()
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except:
+        release_lock()
+        # don't rely on logging already being set up if there was an
+        # exception before we got to that--of course log_dir might not
+        # be writeable...
+        try:
+            logging.basicConfig(filename=os.path.join(log_dir, 'log.exceptions'), format='%(asctime)s %(message)s')
+            logging.exception('unhandled exception:')
+        except IOError:
+            pass

@@ -215,7 +215,7 @@ def do_merge(first_line, steering_lines):
             return
 
         if eos_exists(dest_fn):
-            logging.info('%s already exists, skipping', dest_fn)
+            logging.debug('%s already exists, skipping', dest_fn)
             return
 
         if not eos_mkdir(dest_fn):
@@ -265,7 +265,7 @@ process.out.dropMetaData = cms.untracked.string('ALL')
                 logging.error('problem with xrdcp')
             else:
                 for_mail.append(('merge', dest_fn, events_line))
-                logging.info('success!')
+                logging.debug('success!')
 
             os.chdir(scratch_dir)
             shutil.rmtree(cmssw_dir)
@@ -291,10 +291,10 @@ def do_copy(first_line, steering_lines):
             continue
 
         dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
-        logging.info('%s -> %s', source_fn, dest_fn)
+        logging.debug('%s -> %s', source_fn, dest_fn)
 
         if eos_exists(dest_fn):
-            logging.info('%s already exists, skipping', dest_fn)
+            logging.debug('%s already exists, skipping', dest_fn)
             continue
 
         if not eos_mkdir(dest_fn):
@@ -311,7 +311,7 @@ def do_copy(first_line, steering_lines):
                 logging.error('and could not remove fn %s', dest_fn)
         else:
             for_mail.append(('copy', source_fn))
-            logging.info('success!')
+            logging.debug('success!')
 
     return for_mail
 
@@ -327,19 +327,19 @@ def main():
     for_mail = []
 
     for steering_fn in steering_fns:
-        logging.info('steering fn %s', steering_fn)
+        msg = 'steering fn %s: ' % steering_fn
         steering_lines = [l.strip() for l in open(steering_fn).readlines() if l.strip()]
         if not steering_lines:
-            logging.info('empty file?')
+            logging.info(msg + 'empty file?')
             continue
 
         first_line = steering_lines.pop(0)
-        logging.debug('first line: %r with %i following lines', first_line, len(steering_lines))
+        logging.debug('%s first line: %r with %i following lines', steering_fn, first_line, len(steering_lines))
 
         # if the first line starts with "merge", then run a CMSSW
         # merge job with the supplied parameters.
         if first_line.startswith('merge'):
-            logging.info('is a merge job: %s', first_line)
+            logging.info(msg + 'merge job: %s with %i lines', first_line, len(steering_lines))
             ret = do_merge(first_line, steering_lines)
             if ret:
                 for_mail.extend(ret)
@@ -348,7 +348,7 @@ def main():
         # in md5sum format: copy the files to our dest and read them
         # back and check the md5sum.
         elif first_line.startswith('copy'):
-            logging.info('is a copy job')
+            logging.info(msg + 'copy job: %i lines' % len(steering_lines))
             ret = do_copy(first_line, steering_lines)
             if ret:
                 for_mail.extend(ret)
@@ -356,10 +356,12 @@ def main():
         else:
             logging.error('dunno how to handle this steering file with first line %s', first_line)
 
+    msg  = '%i successful operations; %i warnings and %i errors.' % (len(for_mail), logging.warning.counter, logging.error.counter)
+    logging.info(msg)
+
     if for_mail or logging.warning.counter or logging.error.counter:
         mail  = 'Log tag: ' + log_tag + '\n'
-        mail += 'There were %i warnings and %i errors.\n' % (logging.warning.counter, logging.error.counter)
-        mail += 'Successful operations (# = %i):\n' % len(for_mail)
+        mail += msg + '\nOperations:\n'
         mail += '\n'.join([' '.join(x) for x in for_mail])
         send_mail(mail)
         

@@ -110,32 +110,28 @@ def setup_dirs():
             os.mkdir(d)
             os.chmod(d, 0755)
 
-def take_lock():
-    last_count = 0
-    if os.path.isfile(lock_fn):
-        last_count = int(open(lock_fn, 'r').read())
-    open(lock_fn, 'wt').write(str(last_count + 1))
-
-def release_lock():
-    os.remove(lock_fn)
-
 def lock_count():
     if not os.path.isfile(lock_fn):
         return 0
     else:
-        int(open(lock_fn).read())
+        return int(open(lock_fn).read())
+
+def take_lock():
+    count = lock_count() + 1
+    open(lock_fn, 'wt').write(str(count))
+    return count
+
+def release_lock():
+    os.remove(lock_fn)
 
 def check_lock():
     # if we are still running or crashed last time without cleaning up
     # the lock, die immediately. If this is the max_lock_count-th time
-    # in a row, send an email.
-    c = lock_count()
-    take_lock()
-    if c:
-        if c >= max_lock_count:
-            msg = 'lock is broken: count = %i' % c
-            print msg
-            send_mail(msg)
+    # in a row, log and die.
+    c = take_lock()
+    if c > 1:
+        logging.basicConfig(filename=os.path.join(log_dir, 'log.lock'), format='%(levelname)s %(asctime)s %(message)s')
+        logging.error('already locked: count = %i' % c)
         return False
     return True
 

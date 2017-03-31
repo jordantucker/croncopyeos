@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+
+import imp; imp.load_source('croncopyeos', 'croncopyeos')
+from croncopyeos import *
+
+user = sys.argv[1]
+dest_dir_base = '/store/user/%s/croncopyeos/' % user
+
+to_delete = []
+to_redo = []
+
+for fn in sys.argv[2:]:
+    steering_lines = [l.strip() for l in open(fn).readlines() if l.strip()]
+    if steering_lines.pop(0) != 'copy':
+        print fn, 'is not a copy steering file'
+        continue
+
+    for line, mo in parse_copy(steering_lines):
+        if mo:
+            md5sum, source_fn = mo
+            new_md5sum = None
+            dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
+            if eos_exists(dest_fn):
+                new_md5sum = eos_md5sum(dest_fn)
+            print md5sum, new_md5sum, dest_fn
+            if new_md5sum != md5sum:
+                if new_md5sum is not None:
+                    to_delete.append(dest_fn)
+                to_redo.append(dest_fn)
+
+print '\nto delete:'
+for x in to_delete:
+    print x
+print '\nto redo:'
+for x in to_redo:
+    print x

@@ -273,6 +273,23 @@ process.out.dropMetaData = cms.untracked.string('ALL')
 
     return for_mail
 
+def do_delete(first_line, steering_lines):
+    for_mail = []
+    for line in steering_lines:
+        line = line.replace('/eos/uscms', '')
+        if not line.startswith(dest_dir_base) or not line.endswith('.root'):
+            logging.warning('bad line: %r', line)
+
+        if not eos_exists(dest_fn):
+            logging.warning("doesn't exist: %s", dest_fn)
+
+        if not eos_rm(dest_fn):
+            logging.error('rm failed: %s', dest_fn)
+
+        for_mail.append(('delete', dest_fn))
+
+    return for_mail
+
 def parse_copy(steering_lines):
     copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
     ret = []
@@ -288,8 +305,6 @@ def parse_copy(steering_lines):
 
 def do_copy(first_line, steering_lines):
     for_mail = []
-    copy_line_re = re.compile(r'([0-9A-Fa-f]+)\s+(.*%s.*)' % source_dir_base)
-
     for line, mo in parse_copy(steering_lines):
         if mo is None:
             logging.warning('bad line: %r', line)
@@ -355,7 +370,15 @@ def main():
             ret = do_merge(first_line, steering_lines)
             if ret:
                 for_mail.extend(ret)
-            
+
+        # "delete" lets the remote operator clean up. can only delete
+        # files in our dir on eos.
+        elif first_line.startswith('delete'):
+            logging.info(msg + 'delete job: %i lines', len(steering_lines))
+            ret = do_delete(first_line, steering_lines)
+            if ret:
+                for_mail.extend(ret)
+
         # else, the file must start with "copy" and consist of lines
         # in md5sum format: copy the files to our dest and read them
         # back and check the md5sum.

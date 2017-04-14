@@ -1,8 +1,20 @@
 #!/usr/bin/env python
 
+# changelog:
+# v3:
+#  first version that has a number
+#  when md5sum not equal, put fn to log 
+# v2:
+#  first bugfix release with Werner
+#  delete function, other stuffs
+# v1:
+#  first release to Werner
+
 import os, sys, shutil, glob, subprocess, re, logging, time
 from datetime import datetime
 from glob import glob
+
+version = 3
 
 user = os.environ['USER']
 home = os.path.expanduser('~')
@@ -189,6 +201,7 @@ def setup():
     setup_log()
     install_script()
     setup_crontab()
+    logging.info('version: %s' % version)
     logging.info('hostname: ' + hostname())
     logging.info('eos quota:\n' + eos_quota())
     return True
@@ -335,11 +348,11 @@ def do_copy(first_line, steering_lines):
             continue
 
         if not eos_cp(source_fn, dest_fn):
-            logging.error('problem with copy')
+            logging.error('problem with copying %s', source_fn)
 
         new_md5sum = eos_md5sum(dest_fn)
         if new_md5sum != md5sum:
-            logging.error('bad md5sum: old = %s new = %s', md5sum, new_md5sum)
+            logging.error('for fn %s, bad md5sum: old = %s new = %s', source_fn, md5sum, new_md5sum)
             if not eos_rm(dest_fn):
                 logging.error('and could not remove fn %s', dest_fn)
         else:

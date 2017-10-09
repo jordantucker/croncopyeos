@@ -36,7 +36,6 @@ my_dir = os.path.join(home, '.croncopyeos')
 script_path = os.path.join(my_dir, 'croncopyeos')
 
 lock_fn = os.path.join(my_dir, 'lock')
-max_lock_count = 5
 
 log_dir = os.path.join(my_dir, 'logs')
 log_level_fn = os.path.join(source_list_dir, '.loglevel')
@@ -143,8 +142,7 @@ def release_lock():
 
 def check_lock():
     # if we are still running or crashed last time without cleaning up
-    # the lock, die immediately. If this is the max_lock_count-th time
-    # in a row, log and die.
+    # the lock, die immediately.
     c = take_lock()
     if c > 1:
         logging.basicConfig(filename=os.path.join(log_dir, 'log.lock'), format='%(levelname)s %(asctime)s %(message)s')

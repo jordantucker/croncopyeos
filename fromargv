@@ -1,0 +1,13 @@
+#!/usr/bin/env python
+
+import imp; imp.load_source('croncopyeos', 'croncopyeos')
+from croncopyeos import *
+
+print 'copy'
+
+for in_fn in sys.argv[1:]:
+    for line in open(in_fn):
+        fn = line.strip()
+        fn = fn.replace('/eos/uscms', '')
+        if fn:
+            print '%s  %s' % (eos_md5sum(fn), fn)

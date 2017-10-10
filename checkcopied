@@ -1,8 +1,12 @@
 #!/usr/bin/env python
 
+from math import ceil
 import imp; imp.load_source('croncopyeos', 'croncopyeos')
 from croncopyeos import *
 
+verbose = 'verbose' in sys.argv
+if verbose:
+    sys.argv.remove('verbose')
 user = sys.argv[1]
 dest_dir_base = '/store/user/%s/croncopyeos/' % user
 
@@ -15,22 +19,51 @@ for fn in sys.argv[2:]:
         print fn, 'is not a copy steering file'
         continue
 
-    for line, mo in parse_copy(steering_lines):
+    nlines = len(steering_lines)
+    progress_per = int(ceil(nlines / 20.))
+
+    sys.stdout.write('%s, %i lines: ' % (fn, nlines))
+    sys.stdout.flush()
+
+    for iline, (line, mo) in enumerate(parse_copy(steering_lines)):
+        if iline % progress_per == 0:
+            sys.stdout.write('.')
+            sys.stdout.flush()
+
         if mo:
             md5sum, source_fn = mo
             new_md5sum = None
             dest_fn = source_fn.replace(source_dir_base, dest_dir_base)
             if eos_exists(dest_fn):
                 new_md5sum = eos_md5sum(dest_fn)
-            print md5sum, new_md5sum, dest_fn
+            x = md5sum, new_md5sum, dest_fn
+            if verbose:
+                print md5sum, new_md5sum, dest_fn
             if new_md5sum != md5sum:
                 if new_md5sum is not None:
-                    to_delete.append(dest_fn)
-                to_redo.append(dest_fn)
+                    to_delete.append(x)
+                to_redo.append(x)
 
-print '\nto delete:'
-for x in to_delete:
-    print x
-print '\nto redo:'
-for x in to_redo:
-    print x
+    print
+
+if to_delete:
+    print '\nto delete:'
+    for x in to_delete:
+        print x
+if to_redo:
+    print '\nto redo:'
+    for x in to_redo:
+        print x
+
+'''
+( for x in $(awk '/root/ { print $2 }' mfv_neu_2015.txt); do
+z=${x/tucker/wsun\/croncopyeos}
+md5x=$(eosmd5sum $x | cut -d ' ' -f 1)
+md5z=$(eosmd5sum $z | cut -d ' ' -f 1)
+echo $x $md5x
+echo '->' $z $md5z
+if [[ $md5x != $md5z ]]; then
+  printf '\e[7mPROBLEM\e[m'
+fi
+done ) | tee kdkdkd
+'''

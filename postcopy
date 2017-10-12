@@ -1,0 +1,10 @@
+#!/bin/bash
+for x in $(grep root $@ | awk '{print $2}'); do
+    dirname $x
+done | sort | uniq > dirs
+for x in $(grep root $@ | awk '{print $2}'); do
+    echo $x | sed 's@/store/user/tucker/@@'
+done | sort | uniq > todel
+for x in $(<dirs); do
+     eos $fxrd find $x
+done | egrep -v 'root$|/$' > nonrootfiles

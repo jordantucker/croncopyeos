@@ -55,6 +55,9 @@ if to_redo:
     for x in to_redo:
         print x
 
+if to_delete or to_redo:
+    sys.exit(1)
+
 '''
 ( for x in $(awk '/root/ { print $2 }' mfv_neu_2015.txt); do
 z=${x/tucker/wsun\/croncopyeos}

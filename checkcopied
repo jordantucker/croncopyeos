@@ -24,9 +24,11 @@ for fn in sys.argv[2:]:
 
     sys.stdout.write('%s, %i lines: ' % (fn, nlines))
     sys.stdout.flush()
+    if verbose:
+        print
 
     for iline, (line, mo) in enumerate(parse_copy(steering_lines)):
-        if iline % progress_per == 0:
+        if not verbose and iline % progress_per == 0:
             sys.stdout.write('.')
             sys.stdout.flush()
 

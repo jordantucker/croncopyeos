@@ -22,7 +22,7 @@ for fn in sys.argv[2:]:
     nlines = len(steering_lines)
     progress_per = int(ceil(nlines / 20.))
 
-    sys.stdout.write('%s, %i lines: ' % (fn, nlines))
+    sys.stdout.write('%-50s, %4i lines: ' % (fn, nlines))
     sys.stdout.flush()
     if verbose:
         print

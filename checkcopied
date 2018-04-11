@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import pwd, sys
 from math import ceil
 import imp; imp.load_source('croncopyeos', 'croncopyeos')
 from croncopyeos import *
@@ -8,6 +9,10 @@ verbose = 'verbose' in sys.argv
 if verbose:
     sys.argv.remove('verbose')
 user = sys.argv[1]
+try:
+    pwd.getpwnam(user)
+except KeyError:
+    sys.exit('first arg must be a username, %r not found in pwdb' % user)
 dest_dir_base = '/store/user/%s/croncopyeos/' % user
 
 to_delete = []

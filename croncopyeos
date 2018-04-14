@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 
 # changelog:
+# v6:
+#  delete can rmdir
+#  delete doesn't have to only work on root files (but still limited to paths under croncopyeos dir)
 # v5:
 #  fix new bug in eos_quota since eos upgrade
 # v4:
@@ -18,7 +21,7 @@ import os, sys, shutil, glob, subprocess, re, logging, time
 from datetime import datetime
 from glob import glob
 
-version = 5
+version = 6
 
 user = os.environ['USER']
 home = os.path.expanduser('~')
@@ -92,6 +95,9 @@ def eos_cp(src, dst):
 
 def eos_rm(fn):
     return system('eos %s rm %s' % (eos_url, fn))
+
+def eos_rmdir(fn):
+    return system('eos %s rmdir %s' % (eos_url, fn))
 
 def eos_md5sum(fn):
     cmd = 'xrdcp -s %s%s -' % (eos_url, fn)
@@ -295,7 +301,7 @@ def do_delete(first_line, steering_lines):
     for_mail = []
     for line in steering_lines:
         fn = line = line.replace('/eos/uscms', '')
-        if not line.startswith(dest_dir_base) or not line.endswith('.root'):
+        if not line.startswith(dest_dir_base):
             logging.warning('bad line: %r', line)
             continue
 
@@ -303,8 +309,9 @@ def do_delete(first_line, steering_lines):
             logging.warning("doesn't exist: %s", fn)
             continue
 
-        if not eos_rm(fn):
-            logging.error('rm failed: %s', fn)
+        fcn = eos_rmdir if fn.endswith('/') else eos_rm
+        if not fcn(fn):
+            logging.error('delete failed: %s', fn)
             continue
 
         for_mail.append(('delete', fn))

@@ -64,6 +64,8 @@ if to_redo:
 
 if to_delete or to_redo:
     sys.exit(1)
+else:
+    print 'all good!'
 
 '''
 ( for x in $(awk '/root/ { print $2 }' mfv_neu_2015.txt); do

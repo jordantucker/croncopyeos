@@ -3,11 +3,12 @@
 import imp; imp.load_source('croncopyeos', 'croncopyeos')
 from croncopyeos import *
 
-print 'copy'
-
 for in_fn in sys.argv[1:]:
-    for line in open(in_fn):
-        fn = line.strip()
-        fn = fn.replace('/eos/uscms', '')
-        if fn:
-            print '%s  %s' % (eos_md5sum(fn), fn)
+    with file('copy_%s' % in_fn, 'wt') as out_f, file(in_fn) as in_f:
+        out_f.write('copy\n')
+        for line in in_f:
+            fn = line.strip().replace('/eos/uscms', '')
+            if fn:
+                x = '%s  %s' % (eos_md5sum(fn), fn)
+                out_f.write(x+'\n')
+                print x

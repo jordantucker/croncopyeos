@@ -15,5 +15,5 @@ echo delete
 for path in "$@"; do
     storepath=/store/user/$user/croncopyeos/$path
     eos root://cmseos.fnal.gov find -f $storepath | sed 's@/eos/uscms@@'
-    eos root://cmseos.fnal.gov find -d $storepath | sed 's@/eos/uscms@@' | perl -e 'print sort { length($b) <=> length($a) } <>'
+    eos root://cmseos.fnal.gov find -d $storepath | sed 's@^path=/eos/uscms@@' | perl -e 'print sort { length($b) <=> length($a) } <>'
 done
